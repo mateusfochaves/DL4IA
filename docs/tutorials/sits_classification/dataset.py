@@ -10,7 +10,7 @@ import numpy as np
 import os
 import collections.abc
 
-from utils.utils import pad_tensor
+from myutils.utils import pad_tensor
 
 
 class Padding:
@@ -95,8 +95,18 @@ class PixelSetData(Dataset):
         ]
 
 
-    def __len__(self):
-        raise NotImplementedError
+    def __len__(self): #donne la taille du dataset
+        return len(self.labels)
+        
     
-    def __getitem__(self, i):
-        raise NotImplementedError
+    def __getitem__(self, i): #renvoie les données de l'échantillon i 
+        if self.set in ['train', 'test']:
+            sample = torch.load(os.path.join(self.folder, 'data', f'sample_{i}.pt'))
+            doys = torch.load(os.path.join(self.folder, 'data', f'doy_{i}.pt'))
+        else:
+            raise NotImplementedError
+        
+        label = self.labels[i]
+        sample = sample / self.quantification_value
+
+        return sample, doys, label

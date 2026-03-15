@@ -74,8 +74,55 @@ class LearnableQueryMultiHeadAttention(nn.Module):
     def __init__(self, n_head, d_model, d_k, d_v, dropout=0.1, compute_values=True):
         super().__init__()
 
-    def forward(self):
-        raise NotImplementedError
+        self.n_head = n_head
+        self.d_k = d_k
+        self.d_v = d_v
+        self.compute_values = compute_values
+
+        # A single learnable query token.
+        self.query = nn.Parameter(torch.randn(1, 1, d_model))
+
+        self.w_qs = nn.Linear(d_model, n_head * d_k, bias=False)
+        self.w_ks = nn.Linear(d_model, n_head * d_k, bias=False)
+        self.fc = nn.Linear(n_head * d_v, d_model, bias=False)
+        if compute_values:
+            self.w_vs = nn.Linear(d_model, n_head * d_v, bias=False)
+
+        self.attention = ScaledDotProductAttention(temperature=d_k ** 0.5)
+
+        self.dropout = nn.Dropout(dropout)
+        self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
+
+    def forward(self, x, mask=None):
+
+        d_k, d_v, n_head = self.d_k, self.d_v, self.n_head
+        sz_b, len_k, len_v = x.size(0), x.size(1), x.size(1)
+        len_q = 1
+
+        q_input = self.query.expand(sz_b, -1, -1)
+        residual = q_input
+
+        q = self.w_qs(q_input).view(sz_b, len_q, n_head, d_k)
+        k = self.w_ks(x).view(sz_b, len_k, n_head, d_k)
+        if self.compute_values:
+            v = self.w_vs(x).view(sz_b, len_v, n_head, d_v)
+        else:
+            v = x.view(sz_b, len_v, 1, -1).repeat(1, 1, n_head, 1)
+
+        q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+
+        if mask is not None:
+            # mask: (B, L) -> (B, n_head, 1, L)
+            mask = mask.unsqueeze(1).repeat(1, self.n_head, 1).unsqueeze(2)
+
+        q, attn = self.attention(q, k, v, mask=mask)
+
+        q = q.transpose(1, 2).contiguous().view(sz_b, len_q, -1)
+        q = self.dropout(self.fc(q))
+        q += residual
+        q = self.layer_norm(q)
+
+        return q, attn
     
 class ScaledDotProductAttention(nn.Module):
     ''' Scaled Dot-Product Attention 

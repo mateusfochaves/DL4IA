@@ -31,7 +31,7 @@ class Transformer(nn.Module):
             n_position=365, 
             T=1000, 
             return_attns=False, 
-            learnable_query=False, 
+            learnable_query=True, 
             spectral_indices_embedding=False,
             channels={}, 
             compute_values=True):
@@ -112,8 +112,17 @@ class Transformer(nn.Module):
         if doys is None:
             doys = torch.zeros((data.shape[0], data.shape[1]))
 
-        embeddings = ...
-        temporal_mask = ...
+        # Temporal mask (True for padded time steps)
+        if data.dim() == 4:
+            temporal_mask = (data == self.pad_value).all(dim=(2, 3))
+        elif data.dim() == 3:
+            temporal_mask = (data == self.pad_value).all(dim=-1)
+        else:
+            raise ValueError(f"Unexpected input shape: {tuple(data.shape)}")
+
+        embeddings = self.embedding(data)
+        if self.scale_proj:
+            embeddings = embeddings * (self.d_model ** -0.5)
         
         if self.return_attns:
             enc_output, attns = self.encoder(embeddings, doys, temporal_mask)
@@ -121,7 +130,9 @@ class Transformer(nn.Module):
             enc_output = self.encoder(embeddings, doys, temporal_mask)
             attns = None
 
-        enc_output = ...
+        enc_output = self.temporal_aggregator(enc_output, temporal_mask)
+        if enc_output.dim() == 3 and enc_output.shape[1] == 1:
+            enc_output = enc_output[:, 0]
 
         return enc_output, attns
     

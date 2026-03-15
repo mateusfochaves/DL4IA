@@ -1,0 +1,31 @@
+batch_size: 64
+channels: null
+classifier:
+  d_inner: 128
+compute_values: true
+d_inner: 64
+d_k: 64
+d_model: 64
+d_v: 64
+data_folder: ./s2_agri_pixel_set
+device: cpu
+dropout: 0
+epochs: 15
+learnable_query: false
+loss:
+  gamma: 1
+lr: 1e-4
+max_len: 24
+n_channels: 10
+n_head: 8
+n_layers: 6
+n_pixels: 64
+pad_value: 0
+pos_embedding:
+  T: 1000
+  n_position: 365
+res_dir: ./results
+return_attns: true
+scale_emb_or_prj: prj
+spectral_indices: false
+val_split: 0.2

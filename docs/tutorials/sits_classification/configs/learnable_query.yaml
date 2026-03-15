@@ -1,5 +1,5 @@
 # Data
-data_folder: your/path/to/data
+data_folder: ./s2_agri_pixel_set
 n_channels: 10
 n_pixels: 64
 pad_value: 0
@@ -9,7 +9,7 @@ max_len: 24
 epochs: 15
 batch_size: 64
 lr: 1e-4
-device: cuda
+device: cpu
 val_split: 0.2
 
 # Model
@@ -24,7 +24,7 @@ scale_emb_or_prj: prj
 pos_embedding:
   n_position: 365
   T: 1000
-return_attns: False
+return_attns: True
 classifier:
   d_inner: 128
 learnable_query: True
@@ -35,4 +35,4 @@ spectral_indices: False
 channels:
 
 # Results folder
-res_dir: your/path/to/results
+res_dir: ./results

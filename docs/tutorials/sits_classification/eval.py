@@ -17,9 +17,20 @@ import yaml
 import sys
 import pickle as pkl
 from sklearn.metrics import confusion_matrix, accuracy_score, f1_score
+from myutils.utils import get_flops, get_params
+from fvcore.nn import FlopCountAnalysis
 
-
+if len(sys.argv) < 2:
+    print("Usage: python eval.py <results_folder>")
+    sys.exit(1)
 results_folder = sys.argv[1]
+
+print("RESULTS FOLDER =", results_folder)
+print("EXISTS?", os.path.exists(results_folder))
+
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 with open(os.path.join(results_folder, 'train_config.yaml'), 'r') as file:
     cfg = yaml.safe_load(file)
@@ -34,7 +45,12 @@ n_classes = len(np.unique(dataset.labels))
 padding = Padding(pad_value=cfg['pad_value'])
 
 data_loader = torch.utils.data.DataLoader(
-    ...
+    dataset,
+    batch_size=cfg['batch_size'],
+    shuffle=False,
+    num_workers=cfg.get('num_workers', 0),
+    collate_fn=padding.pad_collate,
+    pin_memory=(cfg.get('device', 'cpu') == 'mps' and torch.mps.is_available()),
 )
 
 encoder = Transformer(
@@ -63,8 +79,8 @@ classifier = ShallowClassifier(
     n_classes=n_classes)
 
 
-if cfg['device'] == 'cuda' and torch.cuda.is_available():
-    device = torch.device("cuda")
+if cfg['device'] == 'mps' and torch.mps.is_available():
+    device = torch.device("mps")
 else:
     device = torch.device("cpu")
 
@@ -77,6 +93,40 @@ del checkpoint
 
 encoder.eval()
 classifier.eval()
+
+n_params_encoder = count_parameters(encoder)
+n_params_classifier = count_parameters(classifier)
+n_params_total = n_params_encoder + n_params_classifier
+
+print("=== PARAMETERS ===")
+print("Encoder params:", n_params_encoder)
+print("Classifier params:", n_params_classifier)
+print("Total params:", n_params_total)
+
+def compute_flops(encoder, classifier, data_loader, device):
+    encoder.eval()
+    classifier.eval()
+
+    data, doys, labels = next(iter(data_loader))
+    data = data.to(device)
+    doys = doys.to(device)
+
+    class FullModel(torch.nn.Module):
+        def __init__(self, encoder, classifier):
+            super().__init__()
+            self.encoder = encoder
+            self.classifier = classifier
+
+        def forward(self, data, doys):
+            z, _ = self.encoder(data, doys)
+            logits = self.classifier(z)
+            return logits
+
+    full_model = FullModel(encoder, classifier).to(device)
+    full_model.eval()
+
+    flops = FlopCountAnalysis(full_model, (data, doys))
+    return flops.total()
 
 y_pred = []
 y_true = []
@@ -112,3 +162,15 @@ with open(os.path.join(results_folder, 'test_metrics.yaml'), 'w') as file:
     yaml.dump(metrics, file)
 
 pkl.dump(cm, open(os.path.join(results_folder, 'conf_mat.pkl'), 'wb'))
+
+print("=== TEST METRICS ===")
+print("Accuracy:", metrics["accuracy"])
+print("Macro F1:", metrics["avg_f1_score"])
+print("F1 per class:", metrics["f1_score"])
+try:
+    total_flops = compute_flops(encoder, classifier, data_loader, device)
+    print("=== FLOPs ===")
+    print("Total FLOPs:", total_flops)
+except Exception as e:
+    print("Could not compute FLOPs:", e)
+    total_flops = None

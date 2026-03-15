@@ -16,8 +16,8 @@ from dataset import PixelSetData, Padding
 from models.transformer.transformer import Transformer
 from models.classifiers import ShallowClassifier
 
-from utils.focal_loss import FocalLoss
-from utils.utils import get_flops, get_params
+from myutils.focal_loss import FocalLoss
+from myutils.utils import get_flops, get_params
 
 
 def main(cfg):
@@ -32,11 +32,21 @@ def main(cfg):
     padding = Padding(pad_value=cfg['pad_value'])
 
     train_data_loader = torch.utils.data.DataLoader(
-        ...
+        train_dataset,
+        batch_size=cfg['batch_size'],
+        shuffle=True,
+        num_workers=cfg.get('num_workers', 0),
+        collate_fn=padding.pad_collate,
+        pin_memory=(cfg.get('device', 'cpu') == 'mps' and torch.mps.is_available()),
     )
 
     val_data_loader = torch.utils.data.DataLoader(
-        ...
+        val_dataset,
+        batch_size=cfg['batch_size'],
+        shuffle=False,
+        num_workers=cfg.get('num_workers', 0),
+        collate_fn=padding.pad_collate,
+        pin_memory=(cfg.get('device', 'cpu') == 'mps' and torch.mps.is_available()),
     )
 
     encoder = Transformer(
@@ -60,11 +70,11 @@ def main(cfg):
     )
 
     input_shape = (1, cfg['max_len'], cfg['n_channels'], cfg['n_pixels'])
-    flops = get_flops(encoder, input_shape)
+    #flops = get_flops(encoder, input_shape)
     params = get_params(encoder)
 
     print("Total number of parameters: {:.2f}M".format(params / 10**6))
-    print("Total number of FLOPs: {:.2f}M".format(flops / 10**6))
+    #print("Total number of FLOPs: {:.2f}M".format(flops / 10**6))
 
     classifier = ShallowClassifier(
         d_input=cfg['d_model'],
@@ -76,8 +86,8 @@ def main(cfg):
     optimizer = optim.Adam(list(encoder.parameters()) + list(classifier.parameters()), lr=lr)
     criterion = FocalLoss(cfg['loss']['gamma'])
 
-    if cfg['device'] == 'cuda' and torch.cuda.is_available():
-        device = 'cuda'
+    if cfg['device'] == 'mps' and torch.mps.is_available():
+        device = 'mps'
     else:
         device = 'cpu'
 
@@ -111,8 +121,8 @@ def main(cfg):
             z, _ = encoder(data, doys)
             logits = classifier(z)
             loss = criterion(logits, labels)
-            pred = ...
-            accuracy = ...
+            pred = torch.argmax(logits, dim=1)
+            accuracy = (pred == labels).float().mean().item() * 100
 
             loss.backward()
             optimizer.step()
@@ -136,8 +146,8 @@ def main(cfg):
                 z, _ = encoder(data, doys)
                 logits = classifier(z)
             loss = criterion(logits, labels)
-            pred = ...
-            accuracy = ...
+            pred = torch.argmax(logits, dim=1)
+            accuracy = (pred == labels).float().mean().item() * 100
 
             val_loss += loss.item() / len(val_data_loader)
             val_acc += accuracy / len(val_data_loader)
